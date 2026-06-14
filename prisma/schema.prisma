@@ -1,0 +1,118 @@
+// Hunch — group prediction market (CPMM live-odds market maker)
+//
+// NOTE ON PORTABILITY: this schema avoids native enums and array columns so the
+// exact same models work on SQLite (local dev) and PostgreSQL (production).
+// To deploy on Postgres, change `provider` below from "sqlite" to "postgresql".
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite" // change to "postgresql" for production
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  balance   Int      @default(1000)
+  isAdmin   Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  marketsCreated Market[]         @relation("MarketCreator")
+  bets           Bet[]
+  approvals      MarketApproval[]
+  comments       Comment[]
+  notifications  Notification[]
+}
+
+model Market {
+  id          String    @id @default(cuid())
+  title       String
+  description String    @default("")
+  category    String    @default("General")
+  status      String    @default("PROPOSED") // PROPOSED | OPEN | CLOSED | RESOLVED
+  outcome     String? //                         YES | NO (set on resolve)
+  creatorId   String
+  creator     User      @relation("MarketCreator", fields: [creatorId], references: [id])
+  closesAt    DateTime
+  resolvesAt  DateTime?
+  createdAt   DateTime  @default(now())
+  openedAt    DateTime?
+  resolvedAt  DateTime?
+
+  // Constant-product market maker pools (share counts). probYes = noPool / (yesPool + noPool).
+  yesPool   Float @default(250)
+  noPool    Float @default(250)
+  liquidity Float @default(250) // seed liquidity per side, kept for the price-history replay
+
+  bets      Bet[]
+  approvals MarketApproval[]
+  comments  Comment[]
+
+  @@index([status])
+}
+
+model MarketApproval {
+  id        String   @id @default(cuid())
+  marketId  String
+  market    Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+
+  @@unique([marketId, userId])
+}
+
+model Bet {
+  id        String   @id @default(cuid())
+  marketId  String
+  market    Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  side      String //   YES | NO
+  amount    Int //       points spent
+  shares    Float    @default(0) // shares received from the market maker
+  payout    Int? //      null = unsettled, 0 = lost, >0 = won (set on resolve)
+  createdAt DateTime @default(now())
+
+  @@index([marketId])
+  @@index([userId])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  marketId  String
+  market    Market   @relation(fields: [marketId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+
+  @@index([marketId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String //   MARKET_PROPOSED | MARKET_OPEN | MARKET_RESOLVED
+  title     String
+  body      String   @default("")
+  marketId  String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+model LoginToken {
+  id        String    @id @default(cuid())
+  email     String
+  token     String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
